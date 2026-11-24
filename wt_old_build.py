@@ -1774,6 +1774,8 @@ class App(tk.Tk):
         return self.settings.get("steamctl_path", "") or find_steamctl()
 
     def _steamctl_login(self):
+        if not self._ensure_password("steamctl"):
+            return
         exe = self.tool_var.get().strip() or find_steamctl()
         if not exe:
             messagebox.showerror(
@@ -1789,30 +1791,69 @@ class App(tk.Tk):
         cmd += ["apps", "list"]
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
-        if self.password_var.get().strip():
-            env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
+        env["NO_COLOR"] = "1"
+        env["CLICOLOR"] = "0"
+        env["TERM"] = "dumb"
+        env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
-            flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
-            self._login_proc = subprocess.Popen(cmd, creationflags=flags, env=env)
-            self._update_cancel_state()
-            self.status_label.configure(text="Идёт вход в steamctl (окно консоли).")
-            self.after(300, self._poll_login_proc)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE,
+                cwd=str(HERE),
+                env=env,
+                creationflags=flags,
+            )
         except OSError as exc:
             messagebox.showerror("Ошибка запуска", str(exc))
+            return
 
-    def _poll_login_proc(self):
-        proc = self._login_proc
-        if proc is None:
-            return
-        if proc.poll() is None:
-            self.after(300, self._poll_login_proc)
-            return
-        self._login_proc = None
-        self._append_log(f"\n=== Вход steamctl завершён, exit {proc.returncode} ===\n")
-        self.status_label.configure(text="Готово к работе.")
+        self._login_proc = proc
         self._update_cancel_state()
+        self._set_input_enabled(True)
+        self.status_label.configure(text="Идёт вход в steamctl…")
+        self._append_log(
+            "\n=== Вход steamctl ===\n"
+            f"$ {' '.join(_quote(part) for part in cmd)}\n"
+        )
+        threading.Thread(
+            target=self._read_login_output, args=(proc,), daemon=True
+        ).start()
+
+    def _read_login_output(self, proc: subprocess.Popen):
+        assert proc.stdout is not None
+        for raw in iter(proc.stdout.readline, b""):
+            text = strip_ansi(decode_console(raw)).rstrip("\n")
+            if text.strip():
+                self._queue.put(("log", text + "\n"))
+        rc = proc.wait()
+        self._queue.put(("login_finished", rc))
 
     # ---------------- сборка заданий ----------------
+
+    def _ensure_password(self, backend: str) -> bool:
+        """Для steamctl пароль обязателен: без консоли getpass() не работает."""
+        if backend != "steamctl" or self.password_var.get().strip():
+            return True
+        user = self.user_var.get().strip() or "Steam"
+        password = simpledialog.askstring(
+            "Пароль Steam",
+            f"Введите пароль для {user}.\n"
+            "Он не сохраняется на диск и не попадает в лог.",
+            show="•",
+            parent=self,
+        )
+        if password and password.strip():
+            self.password_var.set(password.strip())
+            return True
+        messagebox.showerror(
+            "Нужен пароль",
+            "Для входа через steamctl укажите пароль в поле «Пароль Steam».",
+            parent=self,
+        )
+        return False
 
     def _collect_jobs(self):
         entries = self._selected_entries()
@@ -1844,6 +1885,8 @@ class App(tk.Tk):
             return None
 
         backend = self.backend_var.get()
+        if not self._ensure_password(backend):
+            return None
         exe = self.tool_var.get().strip()
         if not exe:
             exe = find_steamctl() if backend == "steamctl" else find_depotdownloader()
@@ -2092,6 +2135,8 @@ class App(tk.Tk):
         if not text:
             return
         proc = self._proc
+        if proc is None or proc.poll() is not None:
+            proc = self._login_proc
         if proc is None or proc.poll() is not None or proc.stdin is None:
             messagebox.showinfo("Нет процесса", "Сейчас нет запущенного процесса.")
             return
@@ -2167,6 +2212,19 @@ class App(tk.Tk):
                     self.progress.configure(maximum=max(total, 1), value=done)
                 elif kind == "finished":
                     self._on_finished(message[1], message[2])
+                elif kind == "login_finished":
+                    rc = message[1]
+                    self._login_proc = None
+                    self._append_log(f"\n=== Вход steamctl завершён, exit {rc} ===\n")
+                    if rc == 0:
+                        self.status_label.configure(text="Вход выполнен, можно скачивать.")
+                    else:
+                        self.status_label.configure(
+                            text=f"Вход не удался (exit {rc}). Подробности в логе."
+                        )
+                    if not self._running:
+                        self._set_input_enabled(False)
+                    self._update_cancel_state()
         except queue.Empty:
             pass
         finally:
@@ -2177,7 +2235,8 @@ class App(tk.Tk):
         self.download_button.state(["!disabled"])
         self.preview_button.state(["!disabled"])
         self._update_cancel_state()
-        self._set_input_enabled(False)
+        if self._login_proc is None:
+            self._set_input_enabled(False)
         if self._cancel_requested:
             self.status_label.configure(text="Остановлено пользователем.")
             self._append_log("\n=== Остановлено пользователем ===\n")
