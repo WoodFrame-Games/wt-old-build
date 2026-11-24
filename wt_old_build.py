@@ -2102,10 +2102,21 @@ class App(tk.Tk):
         try:
             proc.stdin.write((text + "\n").encode("utf-8"))
             proc.stdin.flush()
-            self._append_log(f"> {text}\n")
+            # пароль/код НЕ пишем в лог — только очищаем поле
             self.stdin_var.set("")
         except (OSError, ValueError) as exc:
             self._append_log(f"Не удалось отправить ввод: {exc}\n")
+
+    def _focus_input(self):
+        self._set_input_enabled(True)
+        try:
+            self.stdin_entry.focus_set()
+            self.stdin_entry.selection_range(0, "end")
+        except tk.TclError:
+            pass
+        self.status_label.configure(
+            text="Нужен ввод: наберите пароль/код в поле «Ввод» и нажмите Enter."
+        )
 
     def _set_input_enabled(self, enabled: bool):
         state = "!disabled" if enabled else "disabled"
@@ -2164,6 +2175,12 @@ class App(tk.Tk):
                 kind = message[0]
                 if kind == "log":
                     self._append_log(message[1])
+                    if re.search(
+                        r"Password:|Enter password|Enter 2FA|Guard|auth code|код\s+Guard|введите.*код",
+                        message[1],
+                        re.IGNORECASE,
+                    ):
+                        self._focus_input()
                 elif kind == "status":
                     self.status_label.configure(text=message[1])
                 elif kind == "progress":

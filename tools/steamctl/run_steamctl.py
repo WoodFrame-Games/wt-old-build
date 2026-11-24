@@ -5,8 +5,12 @@
 потоком. Прокси заставляет getpass использовать обычный readline(), поэтому
 пароль и коды Guard можно вводить в поле «Ввод» приложения.
 """
+import getpass
 import runpy
 import sys
+import warnings
+
+warnings.filterwarnings("ignore", category=getpass.GetPassWarning)
 
 
 class _StdinProxy:
