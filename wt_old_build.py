@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from datetime import datetime
@@ -1112,6 +1113,8 @@ class App(tk.Tk):
         self._login_proc = None
         self._active_dialog = None
         self._rate_limit_hinted = False
+        self._last_jobs = []
+        self._last_out_dir = ""
 
         self._build_menu()
         self._build_ui()
@@ -1350,6 +1353,14 @@ class App(tk.Tk):
         self.threads_spin.pack(side="left")
 
         row += 1
+        self.auto_retry_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            frame,
+            text="Автоповтор 2 раза при ServiceUnavailable",
+            variable=self.auto_retry_var,
+        ).grid(row=row, column=1, sticky="w", pady=(2, 4))
+
+        row += 1
         self.user_label = ttk.Label(frame, text="Имя пользователя Steam:")
         self.user_label.grid(row=row, column=0, sticky="w", pady=4)
         user_wrap = ttk.Frame(frame)
@@ -1395,6 +1406,15 @@ class App(tk.Tk):
             actions, text="Показать команды", command=self._preview_commands
         )
         self.preview_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        row += 1
+        self.retry_button = ttk.Button(
+            frame,
+            text="Повторить последнюю загрузку",
+            command=self._retry_last_download,
+            state="disabled",
+        )
+        self.retry_button.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         row += 1
         self.progress = ttk.Progressbar(frame, mode="determinate", maximum=1, value=0)
@@ -1961,6 +1981,33 @@ class App(tk.Tk):
         ):
             return
 
+        self._last_jobs = [(list(cmd), label) for cmd, label in jobs]
+        self._last_out_dir = out_dir
+        self.retry_button.state(["!disabled"])
+        self._launch_jobs(jobs, out_dir, backend_name)
+
+    def _retry_last_download(self):
+        if self._running:
+            return
+        if not self._last_jobs:
+            messagebox.showinfo(
+                "Нет предыдущей загрузки",
+                "Сначала запустите скачивание хотя бы один раз.",
+            )
+            return
+        jobs = [(list(cmd), label) for cmd, label in self._last_jobs]
+        out_dir = self._last_out_dir
+        summary = "\n".join(f"• {label}" for _cmd, label in jobs)
+        if not messagebox.askyesno(
+            "Повторить загрузку",
+            f"Папка: {out_dir}\n\n{summary}\n\n"
+            "Уже скачанные файлы будут проверены по SHA1 — "
+            "повторно скачаются только битые чанки.",
+        ):
+            return
+        self._launch_jobs(jobs, out_dir, "DepotDownloader/steamctl (как раньше)")
+
+    def _launch_jobs(self, jobs, out_dir, backend_name):
         self._running = True
         self._cancel_requested = False
         self._job_total = len(jobs)
@@ -1969,6 +2016,7 @@ class App(tk.Tk):
         self.status_label.configure(text="Запуск…")
         self.download_button.state(["disabled"])
         self.preview_button.state(["disabled"])
+        self.retry_button.state(["disabled"])
         self.cancel_button.state(["!disabled"])
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1981,7 +2029,7 @@ class App(tk.Tk):
             f"Log: {self._log_path}\n"
             + "=" * 78 + "\n"
         )
-        if self.backend_var.get() == "steamctl":
+        if "steamctl" in backend_name.lower():
             self._append_log(
                 "[INFO] Если steamctl запросит пароль или код Guard — "
                 "введите его в поле «Ввод» под логом.\n"
@@ -2009,8 +2057,44 @@ class App(tk.Tk):
                     self._queue.put(("status", f"Загрузка {index}/{len(jobs)}: {label}"))
                     self._queue.put(("progress", (index - 1, len(jobs))))
 
-                    self._last_output = []
-                    rc = self._run_one(cmd, log_file)
+                    attempt = 0
+                    while True:
+                        attempt += 1
+                        self._last_output = []
+                        rc = self._run_one(cmd, log_file)
+                        if self._cancel_requested:
+                            break
+                        if rc == 0:
+                            break
+                        output = "\n".join(self._last_output)
+                        if (
+                            self.auto_retry_var.get()
+                            and attempt <= 2
+                            and (
+                                "ServiceUnavailable" in output
+                                or "Encountered error downloading chunk" in output
+                            )
+                        ):
+                            delay = attempt * 3
+                            message = (
+                                f"--- ServiceUnavailable: повтор {attempt}/2 "
+                                f"через {delay} с ---\n"
+                            )
+                            self._queue.put(("log", message))
+                            log_file.write(message)
+                            log_file.flush()
+                            for _ in range(delay):
+                                if self._cancel_requested:
+                                    break
+                                time.sleep(1)
+                            if self._cancel_requested:
+                                break
+                            self._queue.put(
+                                ("log", f"--- Повторная попытка {attempt} ---\n")
+                            )
+                            continue
+                        break
+
                     last_rc = rc
                     self._queue.put(("log", f"--- exit code: {rc} ---\n"))
                     log_file.write(f"--- exit code: {rc} ---\n")
@@ -2269,6 +2353,8 @@ class App(tk.Tk):
         self._running = False
         self.download_button.state(["!disabled"])
         self.preview_button.state(["!disabled"])
+        if self._last_jobs:
+            self.retry_button.state(["!disabled"])
         self._update_cancel_state()
         if self._login_proc is None:
             self._set_input_enabled(False)
