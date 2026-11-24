@@ -1790,7 +1790,6 @@ class App(tk.Tk):
 
         self._login_proc = proc
         self._update_cancel_state()
-        self._set_input_enabled(True)
         self.status_label.configure(text="Идёт вход в steamctl…")
         self._append_log(
             "\n=== Вход steamctl ===\n"
@@ -1924,7 +1923,6 @@ class App(tk.Tk):
         self.download_button.state(["disabled"])
         self.preview_button.state(["disabled"])
         self.cancel_button.state(["!disabled"])
-        self._set_input_enabled(True)
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self._log_path = Path(out_dir) / f"wt-download-{timestamp}.log"
@@ -2100,6 +2098,7 @@ class App(tk.Tk):
             # само значение пароля/кода НЕ пишем в лог — только длину
             self._append_log(f"[INFO] отправлено символов: {len(text)}\n")
             self.stdin_var.set("")
+            self._set_input_enabled(False)
         except (OSError, ValueError) as exc:
             self._append_log(f"Не удалось отправить ввод: {exc}\n")
 
