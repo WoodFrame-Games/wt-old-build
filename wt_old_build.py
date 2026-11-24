@@ -1389,6 +1389,23 @@ class App(tk.Tk):
         )
         tip.grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
+        row += 1
+        self.input_label = ttk.Label(frame, text="Ввод (пароль/код):")
+        self.input_label.grid(row=row, column=0, sticky="w", pady=(8, 0))
+        input_wrap = ttk.Frame(frame)
+        input_wrap.grid(row=row, column=1, sticky="ew", pady=(8, 0))
+        input_wrap.columnconfigure(0, weight=1)
+        self.stdin_var = tk.StringVar()
+        self.stdin_entry = ttk.Entry(
+            input_wrap, textvariable=self.stdin_var, state="disabled"
+        )
+        self.stdin_entry.grid(row=0, column=0, sticky="ew")
+        self.stdin_button = ttk.Button(
+            input_wrap, text="↵", command=self._send_input, state="disabled", width=4
+        )
+        self.stdin_button.grid(row=0, column=1, padx=(4, 0))
+        self.stdin_entry.bind("<Return>", lambda _e: self._send_input())
+
         return frame
 
     def _build_log(self, parent):
@@ -1430,28 +1447,6 @@ class App(tk.Tk):
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.log_text.configure(state="disabled")
-
-        input_row = ttk.Frame(frame)
-        input_row.pack(fill="x", pady=(6, 0))
-        ttk.Label(input_row, text="Ввод:").pack(side="left", padx=(0, 6))
-        entry_wrap = ttk.Frame(input_row)
-        entry_wrap.pack(side="left", fill="x", expand=True)
-        self.stdin_var = tk.StringVar()
-        self.stdin_entry = ttk.Entry(
-            entry_wrap, textvariable=self.stdin_var, show="", state="disabled"
-        )
-        self.stdin_entry.pack(fill="x")
-        self.stdin_button = ttk.Button(
-            input_row, text="Отправить", command=self._send_input, state="disabled"
-        )
-        self.stdin_button.pack(side="left", padx=(6, 0))
-        self.stdin_entry.bind("<Return>", lambda _e: self._send_input())
-        ttk.Label(
-            frame,
-            text="Поле активно во время загрузки — сюда можно ввести код Guard/2FA, "
-            "если процесс его запросит.",
-            foreground="#888",
-        ).pack(anchor="w", pady=(4, 0))
 
         return frame
 
