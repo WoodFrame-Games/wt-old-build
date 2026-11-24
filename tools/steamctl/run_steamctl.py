@@ -30,6 +30,7 @@ class _StdinProxy:
         return iter(self._stream)
 
 
+sys.stdin.reconfigure(encoding="utf-8", errors="replace")
 sys.stdin = _StdinProxy(sys.stdin)
 sys.argv = ["steamctl"] + sys.argv[1:]
 runpy.run_module("steamctl", run_name="__main__")

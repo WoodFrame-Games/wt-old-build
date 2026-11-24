@@ -2097,7 +2097,8 @@ class App(tk.Tk):
         try:
             proc.stdin.write((text + "\n").encode("utf-8"))
             proc.stdin.flush()
-            # пароль/код НЕ пишем в лог — только очищаем поле
+            # само значение пароля/кода НЕ пишем в лог — только длину
+            self._append_log(f"[INFO] отправлено символов: {len(text)}\n")
             self.stdin_var.set("")
         except (OSError, ValueError) as exc:
             self._append_log(f"Не удалось отправить ввод: {exc}\n")
