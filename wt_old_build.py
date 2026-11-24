@@ -1080,7 +1080,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("War Thunder — Old Build Downloader")
-        self.geometry("1220x840")
+        self.geometry("1220x960")
         self.minsize(980, 660)
 
         style = ttk.Style(self)
@@ -1182,18 +1182,26 @@ class App(tk.Tk):
             foreground="#555",
         ).pack(anchor="w", pady=(2, 0))
 
-        vpaned = ttk.PanedWindow(self, orient="vertical")
+        paned_opts = dict(
+            sashwidth=12,
+            showhandle=True,
+            handlesize=12,
+            sashrelief="raised",
+            opaqueresize=True,
+            bg="#f0f0f0",
+        )
+        vpaned = tk.PanedWindow(self, orient="vertical", **paned_opts)
         vpaned.pack(fill="both", expand=True, padx=12, pady=(0, 10))
 
         top = ttk.Frame(vpaned)
-        vpaned.add(top, weight=3)
+        vpaned.add(top, stretch="always")
 
-        hpaned = ttk.PanedWindow(top, orient="horizontal")
+        hpaned = tk.PanedWindow(top, orient="horizontal", **paned_opts)
         hpaned.pack(fill="both", expand=True)
-        hpaned.add(self._build_left(hpaned), weight=3)
-        hpaned.add(self._build_right(hpaned), weight=2)
+        hpaned.add(self._build_left(hpaned), stretch="always")
+        hpaned.add(self._build_right(hpaned), stretch="always")
 
-        vpaned.add(self._build_log(vpaned), weight=2)
+        vpaned.add(self._build_log(vpaned), stretch="always")
 
         self._vpaned = vpaned
         self._hpaned = hpaned
@@ -1201,8 +1209,8 @@ class App(tk.Tk):
 
     def _set_sashes(self):
         try:
-            self._vpaned.sashpos(0, max(420, self.winfo_height() - 330))
-            self._hpaned.sashpos(0, 700)
+            self._vpaned.sash_place(0, 0, max(440, self.winfo_height() - 450))
+            self._hpaned.sash_place(0, 700, 0)
         except tk.TclError:
             pass
 
