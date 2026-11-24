@@ -369,12 +369,12 @@ def build_depotdownloader_cmd(
         "-max-downloads", str(threads),
     ]
     user = (user or "").strip()
-    if user:
-        cmd += ["-username", user]
     if qr:
+        # DepotDownloader запрещает -qr вместе с -username — логин определяется QR
         cmd.append("-qr")
-    # -remember-password нужен и при сохрании токена, и вместе с -qr
-    if remember_password or user:
+    elif user:
+        cmd += ["-username", user]
+    if remember_password or qr or user:
         cmd.append("-remember-password")
     return cmd
 
@@ -2609,8 +2609,15 @@ def selftest() -> int:
         "dd.exe", APP_ID, "236391", "3264770838696250786", r"C:\WT_old",
         qr=True, user="example_user",
     )
-    assert "-username" in cmd3 and "-qr" in cmd3
+    assert "-qr" in cmd3 and "-username" not in cmd3
     assert "-remember-password" in cmd3
+
+    cmd4 = build_depotdownloader_cmd(
+        "dd.exe", APP_ID, "236391", "3264770838696250786", r"C:\WT_old",
+        qr=False, user="example_user",
+    )
+    assert "-username" in cmd4 and "-qr" not in cmd4
+    assert "-remember-password" in cmd4
 
     cmd2 = build_steamctl_cmd(
         "steamctl", APP_ID, "236391", "3264770838696250786", r"C:\WT_old",
