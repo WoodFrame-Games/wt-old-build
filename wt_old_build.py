@@ -1453,6 +1453,12 @@ class App(tk.Tk):
         ttk.Button(toolbar, text="Очистить", command=self._clear_log).pack(
             side="left", padx=(10, 0)
         )
+        ttk.Button(toolbar, text="Выделить всё", command=self._select_all_log).pack(
+            side="left", padx=(6, 0)
+        )
+        ttk.Button(toolbar, text="Копировать", command=self._copy_log).pack(
+            side="left", padx=(6, 0)
+        )
         ttk.Button(toolbar, text="Сохранить лог…", command=self._save_log_as).pack(
             side="left", padx=(6, 0)
         )
@@ -1480,6 +1486,14 @@ class App(tk.Tk):
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.log_text.configure(state="disabled")
+
+        self.log_menu = tk.Menu(self, tearoff=0)
+        self.log_menu.add_command(label="Копировать", command=self._copy_log)
+        self.log_menu.add_command(label="Выделить всё", command=self._select_all_log)
+        self.log_text.bind(
+            "<Button-3>",
+            lambda event: self.log_menu.post(event.x_root, event.y_root),
+        )
 
         return frame
 
@@ -2286,6 +2300,27 @@ class App(tk.Tk):
         self.log_text.configure(state="disabled")
         if self.autoscroll_var.get():
             self.log_text.see("end")
+
+    def _select_all_log(self):
+        self.log_text.configure(state="normal")
+        self.log_text.tag_add("sel", "1.0", "end")
+        self.log_text.mark_set("insert", "end")
+        self.log_text.see("end")
+        self.log_text.focus_set()
+        self.log_text.configure(state="disabled")
+
+    def _copy_log(self):
+        content = self.log_text.get("1.0", "end").rstrip()
+        if not content:
+            messagebox.showinfo("Лог пуст", "Нечего копировать.")
+            return
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(content)
+            self.update_idletasks()
+            self.status_label.configure(text="Лог скопирован в буфер обмена.")
+        except tk.TclError:
+            messagebox.showerror("Ошибка", "Не удалось скопировать в буфер обмена.")
 
     def _clear_log(self):
         self.log_text.configure(state="normal")
