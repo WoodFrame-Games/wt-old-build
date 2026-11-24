@@ -1,0 +1,12 @@
+{
+  "output_dir": "C:\\WT_sds",
+  "backend": "depotdownloader",
+  "dd_path": "C:\\Work\\wt-old-build\\tools\\DepotDownloader\\DepotDownloader.exe",
+  "steamctl_path": "",
+  "threads": 16,
+  "use_qr": true,
+  "remember_password": true,
+  "app_id": 236390,
+  "steamctl_user": "",
+  "auto_open_steamdb": true
+}
