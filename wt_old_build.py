@@ -368,12 +368,12 @@ def build_depotdownloader_cmd(
     ]
     user = (user or "").strip()
     if user:
-        # после успешного QR-входа DepotDownloader сохраняет refresh token —
-        # вход по -username + -remember-password надёжнее повторного QR
-        cmd += ["-username", user]
+        # после успешного QR-входа DepotDownloader сохраняет refresh token.
+        # -remember-password заставляет использовать его вместо ввода пароля.
+        cmd += ["-username", user, "-remember-password"]
     elif qr:
         cmd.append("-qr")
-    if remember_password:
+    if remember_password and not user:
         cmd.append("-remember-password")
     return cmd
 
@@ -1111,6 +1111,7 @@ class App(tk.Tk):
         self._extra_env = {}
         self._login_proc = None
         self._active_dialog = None
+        self._rate_limit_hinted = False
 
         self._build_menu()
         self._build_ui()
@@ -2127,7 +2128,7 @@ class App(tk.Tk):
         try:
             proc.stdin.write((text + "\n").encode("utf-8"))
             proc.stdin.flush()
-            # само значение пароля/кода НЕ пишем в лог — только длину
+            # для теста можно показать отправленный текст; по умолчанию — только длина
             self._append_log(f"[INFO] отправлено символов: {len(text)}\n")
             non_ascii = sum(1 for char in text if ord(char) > 127)
             if non_ascii:
@@ -2208,6 +2209,17 @@ class App(tk.Tk):
                 kind = message[0]
                 if kind == "log":
                     self._append_log(message[1])
+                    if (
+                        "RateLimitExceeded" in message[1]
+                        and not self._rate_limit_hinted
+                    ):
+                        self._rate_limit_hinted = True
+                        self._append_log(
+                            "\nSteam временно ограничил попытки входа (rate limit). "
+                            "Не повторяйте логин несколько раз подряд — подождите.\n"
+                            "Лучше использовать сохранённый токен: DepotDownloader, "
+                            "логин в поле, галочку «QR-вход» снять.\n"
+                        )
                     if re.search(
                         r"Password:|Enter password|Enter 2FA|Guard|auth code|код\s+Guard|введите.*код",
                         message[1],
@@ -2402,6 +2414,7 @@ def selftest() -> int:
         qr=True, user="example_user",
     )
     assert "-username" in cmd3 and "-qr" not in cmd3
+    assert "-remember-password" in cmd3
 
     cmd2 = build_steamctl_cmd(
         "steamctl", APP_ID, "236391", "3264770838696250786", r"C:\WT_old",
