@@ -555,7 +555,8 @@ class ManifestDialog(tk.Toplevel):
         )
         ttk.Button(buttons, text="Добавить", command=self._ok).pack(side="right")
 
-        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<Escape>", lambda _e: self._on_close())
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.grab_set()
         self._center(master)
         try:
@@ -571,6 +572,18 @@ class ManifestDialog(tk.Toplevel):
         x = master.winfo_rootx() + (master.winfo_width() - self.winfo_width()) // 2
         y = master.winfo_rooty() + (master.winfo_height() - self.winfo_height()) // 2
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+    def _on_close(self):
+        if getattr(self, "_lookup_running", False):
+            self.stop_lookup()
+        master = self.master
+        if getattr(master, "_active_dialog", None) is self:
+            master._active_dialog = None
+            try:
+                master._update_cancel_state()
+            except AttributeError:
+                pass
+        self.destroy()
 
     def _open_steamdb(self):
         depot = depot_from_choice(self.depot_var.get())
@@ -636,6 +649,10 @@ class ManifestDialog(tk.Toplevel):
 
         self._lookup_running = True
         self._lookup_result = None
+        self._lookup_proc = None
+        master = self.master
+        master._active_dialog = self
+        master._update_cancel_state()
         self.lookup_button.state(["disabled"])
         self.status.configure(text="Запрашиваю дату у Steam…", foreground="#666")
         threading.Thread(
@@ -660,21 +677,23 @@ class ManifestDialog(tk.Toplevel):
         env["NO_COLOR"] = "1"
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=90,
                 env=env,
                 creationflags=flags,
             )
-            output = proc.stdout or ""
-        except subprocess.TimeoutExpired:
-            output = "TIMEOUT: Steam не ответил за 90 секунд."
+            self._lookup_proc = proc
+            try:
+                out_bytes, _ = proc.communicate(timeout=90)
+                output = decode_console(out_bytes or b"")
+            except subprocess.TimeoutExpired:
+                self._kill_lookup_proc()
+                output = "TIMEOUT: Steam не ответил за 90 секунд."
+            finally:
+                self._lookup_proc = None
         except FileNotFoundError:
             output = f"Файл не найден: {exe}"
         except OSError as exc:
@@ -710,12 +729,44 @@ class ManifestDialog(tk.Toplevel):
                 message = " | ".join(lines[-3:])[:300] or "пустой ответ от steamctl"
             self._lookup_result = ("error", message)
 
+    def _kill_lookup_proc(self):
+        proc = getattr(self, "_lookup_proc", None)
+        if proc is None:
+            return
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            else:
+                proc.terminate()
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def stop_lookup(self):
+        self._kill_lookup_proc()
+        self._lookup_result = ("stopped", "")
+
     def _check_lookup(self):
         if self._lookup_result is None:
             self.after(150, self._check_lookup)
             return
         status, value = self._lookup_result
         self._lookup_running = False
+        self._lookup_proc = None
+        master = self.master
+        if getattr(master, "_active_dialog", None) is self:
+            master._active_dialog = None
+        try:
+            master._update_cancel_state()
+        except AttributeError:
+            pass
         try:
             self.lookup_button.state(["!disabled"])
         except tk.TclError:
@@ -723,6 +774,8 @@ class ManifestDialog(tk.Toplevel):
         if status == "ok":
             self.date_var.set(value)
             self.status.configure(text=f"Дата получена из Steam: {value}", foreground="#1b5e20")
+        elif status == "stopped":
+            self.status.configure(text="Запрос даты остановлен.", foreground="#666")
         else:
             self.status.configure(
                 text=f"Не удалось узнать дату: {value}", foreground="#b00020"
@@ -749,7 +802,7 @@ class ManifestDialog(tk.Toplevel):
             "note": self.note_var.get().strip(),
             "auto_open": bool(self.auto_open_var.get()),
         }
-        self.destroy()
+        self._on_close()
 
 
 # --------------------------------------------------------------------------
@@ -1024,6 +1077,8 @@ class App(tk.Tk):
         self._job_done = 0
         self._last_output = []
         self._extra_env = {}
+        self._login_proc = None
+        self._active_dialog = None
 
         self._build_menu()
         self._build_ui()
@@ -1335,7 +1390,7 @@ class App(tk.Tk):
 
         row += 1
         self.cancel_button = ttk.Button(
-            frame, text="Остановить", command=self._cancel, state="disabled"
+            frame, text="Остановить всё", command=self._cancel, state="disabled"
         )
         self.cancel_button.grid(row=row, column=0, columnspan=2, sticky="e", pady=(6, 0))
 
@@ -1737,12 +1792,25 @@ class App(tk.Tk):
         if self.password_var.get().strip():
             env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
         try:
-            if os.name == "nt":
-                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE, env=env)
-            else:
-                subprocess.Popen(cmd, env=env)
+            flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+            self._login_proc = subprocess.Popen(cmd, creationflags=flags, env=env)
+            self._update_cancel_state()
+            self.status_label.configure(text="Идёт вход в steamctl (окно консоли).")
+            self.after(300, self._poll_login_proc)
         except OSError as exc:
             messagebox.showerror("Ошибка запуска", str(exc))
+
+    def _poll_login_proc(self):
+        proc = self._login_proc
+        if proc is None:
+            return
+        if proc.poll() is None:
+            self.after(300, self._poll_login_proc)
+            return
+        self._login_proc = None
+        self._append_log(f"\n=== Вход steamctl завершён, exit {proc.returncode} ===\n")
+        self.status_label.configure(text="Готово к работе.")
+        self._update_cancel_state()
 
     # ---------------- сборка заданий ----------------
 
@@ -2043,13 +2111,45 @@ class App(tk.Tk):
         except tk.TclError:
             pass
 
+    def _any_operation_active(self) -> bool:
+        dialog = getattr(self, "_active_dialog", None)
+        return bool(
+            self._running
+            or (self._login_proc is not None and self._login_proc.poll() is None)
+            or (dialog is not None and getattr(dialog, "_lookup_running", False))
+        )
+
+    def _update_cancel_state(self):
+        state = "!disabled" if self._any_operation_active() else "disabled"
+        try:
+            self.cancel_button.state([state])
+        except tk.TclError:
+            pass
+
     def _cancel(self):
-        if not self._running:
-            return
-        self._cancel_requested = True
+        stopped = []
+        if self._running:
+            self._cancel_requested = True
+            if self._proc is not None:
+                self._terminate_proc(self._proc)
+            stopped.append("загрузка")
+
+        if self._login_proc is not None and self._login_proc.poll() is None:
+            self._terminate_proc(self._login_proc)
+            self._append_log("\n=== Вход steamctl остановлен ===\n")
+            stopped.append("вход steamctl")
+
+        dialog = getattr(self, "_active_dialog", None)
+        if dialog is not None and getattr(dialog, "_lookup_running", False):
+            try:
+                dialog.stop_lookup()
+                stopped.append("запрос даты")
+            except Exception:
+                pass
+
         self.status_label.configure(text="Останавливаю…")
-        if self._proc is not None:
-            self._terminate_proc(self._proc)
+        if stopped:
+            self._append_log(f"\n=== Остановлено: {', '.join(stopped)} ===\n")
 
     # ---------------- очередь сообщений ----------------
 
@@ -2076,7 +2176,7 @@ class App(tk.Tk):
         self._running = False
         self.download_button.state(["!disabled"])
         self.preview_button.state(["!disabled"])
-        self.cancel_button.state(["disabled"])
+        self._update_cancel_state()
         self._set_input_enabled(False)
         if self._cancel_requested:
             self.status_label.configure(text="Остановлено пользователем.")
@@ -2150,10 +2250,10 @@ class App(tk.Tk):
         )
 
     def _on_close(self):
-        if self._running:
+        if self._any_operation_active():
             if not messagebox.askyesno(
-                "Загрузка идёт",
-                "Остановить загрузку и закрыть программу?",
+                "Работа идёт",
+                "Остановить текущие операции и закрыть программу?",
             ):
                 return
             self._cancel()
