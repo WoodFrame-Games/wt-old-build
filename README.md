@@ -17,9 +17,8 @@
 **Оба инструмента встроены**:
 
 * `tools\DepotDownloader\DepotDownloader.exe` — self-contained, отдельный .NET Runtime не нужен;
-* `tools\steamctl\` — steamctl 0.9.5 со всеми зависимостями и совместимой прослойкой
-  вместо `gevent` (под Python 3.14). Запускается через `steamctl.cmd`, путь подставляется
-  автоматически.
+* `tools\steamctl\` — steamctl 0.9.5 + **встроенный Python 3.12** и настоящий `gevent`
+  (запуск через `steamctl.cmd`). Пароль берётся из `STEAMCTL_PASSWORD`.
 
 Приложение найдёт оба инструмента само — пути вручную указывать не надо. Можно просто
 распаковать архив в любую папку и запустить `run.bat`.
