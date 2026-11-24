@@ -1331,23 +1331,6 @@ class App(tk.Tk):
         self.login_button.grid(row=0, column=1, padx=(6, 0))
 
         row += 1
-        ttk.Label(frame, text="Пароль Steam:").grid(
-            row=row, column=0, sticky="w", pady=4
-        )
-        password_wrap = ttk.Frame(frame)
-        password_wrap.grid(row=row, column=1, sticky="ew", pady=4)
-        password_wrap.columnconfigure(0, weight=1)
-        self.password_var = tk.StringVar()
-        ttk.Entry(
-            password_wrap, textvariable=self.password_var, show="•"
-        ).grid(row=0, column=0, sticky="ew")
-        ttk.Label(
-            frame,
-            text="нужен только для входа steamctl; на диск не сохраняется",
-            foreground="#888",
-        ).grid(row=row + 1, column=1, sticky="w")
-
-        row += 2
         ttk.Label(frame, text="App ID:").grid(row=row, column=0, sticky="w", pady=4)
         app_wrap = ttk.Frame(frame)
         app_wrap.grid(row=row, column=1, sticky="ew", pady=4)
@@ -1774,8 +1757,6 @@ class App(tk.Tk):
         return self.settings.get("steamctl_path", "") or find_steamctl()
 
     def _steamctl_login(self):
-        if not self._ensure_password("steamctl"):
-            return
         exe = self.tool_var.get().strip() or find_steamctl()
         if not exe:
             messagebox.showerror(
@@ -1797,7 +1778,6 @@ class App(tk.Tk):
         env["NO_COLOR"] = "1"
         env["CLICOLOR"] = "0"
         env["TERM"] = "dumb"
-        env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
             proc = subprocess.Popen(
@@ -1836,28 +1816,6 @@ class App(tk.Tk):
 
     # ---------------- сборка заданий ----------------
 
-    def _ensure_password(self, backend: str) -> bool:
-        """Для steamctl пароль обязателен: без консоли getpass() не работает."""
-        if backend != "steamctl" or self.password_var.get().strip():
-            return True
-        user = self.user_var.get().strip() or "Steam"
-        password = simpledialog.askstring(
-            "Пароль Steam",
-            f"Введите пароль для {user}.\n"
-            "Он не сохраняется на диск и не попадает в лог.",
-            show="•",
-            parent=self,
-        )
-        if password and password.strip():
-            self.password_var.set(password.strip())
-            return True
-        messagebox.showerror(
-            "Нужен пароль",
-            "Для входа через steamctl укажите пароль в поле «Пароль Steam».",
-            parent=self,
-        )
-        return False
-
     def _collect_jobs(self):
         entries = self._selected_entries()
         if not entries:
@@ -1888,8 +1846,6 @@ class App(tk.Tk):
             return None
 
         backend = self.backend_var.get()
-        if not self._ensure_password(backend):
-            return None
         exe = self.tool_var.get().strip()
         if not exe:
             exe = find_steamctl() if backend == "steamctl" else find_depotdownloader()
@@ -1933,12 +1889,7 @@ class App(tk.Tk):
                 )
             jobs.append((cmd, label))
 
-        # пароль живёт только в памяти процесса приложения и передаётся
-        # дочернему steamctl через окружение (он не попадает в лог/настройки)
         self._extra_env = {}
-        if backend == "steamctl" and self.password_var.get().strip():
-            self._extra_env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
-
         self._collect_settings()
         return jobs, out_dir
 
@@ -1991,11 +1942,9 @@ class App(tk.Tk):
             + "=" * 78 + "\n"
         )
         if self.backend_var.get() == "steamctl":
-            has_password = bool(self._extra_env.get("STEAMCTL_PASSWORD"))
             self._append_log(
-                "[INFO] Пароль для steamctl: "
-                + ("передан через STEAMCTL_PASSWORD\n" if has_password
-                   else "НЕ задан — ожидается ввод в поле «Ввод»\n")
+                "[INFO] Если steamctl запросит пароль или код Guard — "
+                "введите его в поле «Ввод» под логом.\n"
             )
 
         self._worker = threading.Thread(
