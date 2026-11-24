@@ -1023,6 +1023,7 @@ class App(tk.Tk):
         self._job_total = 0
         self._job_done = 0
         self._last_output = []
+        self._extra_env = {}
 
         self._build_menu()
         self._build_ui()
@@ -1275,6 +1276,23 @@ class App(tk.Tk):
         self.login_button.grid(row=0, column=1, padx=(6, 0))
 
         row += 1
+        ttk.Label(frame, text="Пароль Steam:").grid(
+            row=row, column=0, sticky="w", pady=4
+        )
+        password_wrap = ttk.Frame(frame)
+        password_wrap.grid(row=row, column=1, sticky="ew", pady=4)
+        password_wrap.columnconfigure(0, weight=1)
+        self.password_var = tk.StringVar()
+        ttk.Entry(
+            password_wrap, textvariable=self.password_var, show="•"
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Label(
+            frame,
+            text="нужен только для входа steamctl; на диск не сохраняется",
+            foreground="#888",
+        ).grid(row=row + 1, column=1, sticky="w")
+
+        row += 2
         ttk.Label(frame, text="App ID:").grid(row=row, column=0, sticky="w", pady=4)
         app_wrap = ttk.Frame(frame)
         app_wrap.grid(row=row, column=1, sticky="ew", pady=4)
@@ -1374,6 +1392,28 @@ class App(tk.Tk):
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
         self.log_text.configure(state="disabled")
+
+        input_row = ttk.Frame(frame)
+        input_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(input_row, text="Ввод:").pack(side="left", padx=(0, 6))
+        entry_wrap = ttk.Frame(input_row)
+        entry_wrap.pack(side="left", fill="x", expand=True)
+        self.stdin_var = tk.StringVar()
+        self.stdin_entry = ttk.Entry(
+            entry_wrap, textvariable=self.stdin_var, show="", state="disabled"
+        )
+        self.stdin_entry.pack(fill="x")
+        self.stdin_button = ttk.Button(
+            input_row, text="Отправить", command=self._send_input, state="disabled"
+        )
+        self.stdin_button.pack(side="left", padx=(6, 0))
+        self.stdin_entry.bind("<Return>", lambda _e: self._send_input())
+        ttk.Label(
+            frame,
+            text="Поле активно во время загрузки — сюда можно ввести код Guard/2FA, "
+            "если процесс его запросит.",
+            foreground="#888",
+        ).pack(anchor="w", pady=(4, 0))
 
         return frame
 
@@ -1692,11 +1732,15 @@ class App(tk.Tk):
         if user:
             cmd += ["--user", user]
         cmd += ["apps", "list"]
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        if self.password_var.get().strip():
+            env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
         try:
             if os.name == "nt":
-                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE, env=env)
             else:
-                subprocess.Popen(cmd)
+                subprocess.Popen(cmd, env=env)
         except OSError as exc:
             messagebox.showerror("Ошибка запуска", str(exc))
 
@@ -1775,6 +1819,12 @@ class App(tk.Tk):
                 )
             jobs.append((cmd, label))
 
+        # пароль живёт только в памяти процесса приложения и передаётся
+        # дочернему steamctl через окружение (он не попадает в лог/настройки)
+        self._extra_env = {}
+        if backend == "steamctl" and self.password_var.get().strip():
+            self._extra_env["STEAMCTL_PASSWORD"] = self.password_var.get().strip()
+
         self._collect_settings()
         return jobs, out_dir
 
@@ -1814,6 +1864,7 @@ class App(tk.Tk):
         self.download_button.state(["disabled"])
         self.preview_button.state(["disabled"])
         self.cancel_button.state(["!disabled"])
+        self._set_input_enabled(True)
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self._log_path = Path(out_dir) / f"wt-download-{timestamp}.log"
@@ -1904,6 +1955,7 @@ class App(tk.Tk):
         env["NO_COLOR"] = "1"
         env["CLICOLOR"] = "0"
         env["TERM"] = "dumb"
+        env.update(self._extra_env)
 
         creationflags = 0
         if os.name == "nt":
@@ -1914,7 +1966,7 @@ class App(tk.Tk):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 cwd=str(HERE),
                 env=env,
                 creationflags=creationflags,
@@ -1967,6 +2019,30 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    def _send_input(self):
+        text = self.stdin_var.get()
+        if not text:
+            return
+        proc = self._proc
+        if proc is None or proc.poll() is not None or proc.stdin is None:
+            messagebox.showinfo("Нет процесса", "Сейчас нет запущенного процесса.")
+            return
+        try:
+            proc.stdin.write((text + "\n").encode("utf-8"))
+            proc.stdin.flush()
+            self._append_log(f"> {text}\n")
+            self.stdin_var.set("")
+        except (OSError, ValueError) as exc:
+            self._append_log(f"Не удалось отправить ввод: {exc}\n")
+
+    def _set_input_enabled(self, enabled: bool):
+        state = "!disabled" if enabled else "disabled"
+        try:
+            self.stdin_entry.state([state])
+            self.stdin_button.state([state])
+        except tk.TclError:
+            pass
+
     def _cancel(self):
         if not self._running:
             return
@@ -2001,6 +2077,7 @@ class App(tk.Tk):
         self.download_button.state(["!disabled"])
         self.preview_button.state(["!disabled"])
         self.cancel_button.state(["disabled"])
+        self._set_input_enabled(False)
         if self._cancel_requested:
             self.status_label.configure(text="Остановлено пользователем.")
             self._append_log("\n=== Остановлено пользователем ===\n")
