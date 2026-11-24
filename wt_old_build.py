@@ -24,6 +24,7 @@ War Thunder — Old Build Downloader
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import queue
@@ -1156,6 +1157,10 @@ class App(tk.Tk):
             label="Импорт сохранённой страницы SteamDB (HTML)…",
             command=self._import_html_file,
         )
+        tools_menu.add_command(
+            label="Очистить сохранённые логины…",
+            command=self._clear_saved_logins,
+        )
         tools_menu.add_command(label="Проверить пути инструментов", command=self._autodetect_tools)
         menubar.add_cascade(label="Инструменты", menu=tools_menu)
 
@@ -1433,12 +1438,6 @@ class App(tk.Tk):
         self.status_label.grid(row=row, column=0, columnspan=2, sticky="w")
 
         row += 1
-        self.cancel_button = ttk.Button(
-            frame, text="Остановить всё", command=self._cancel, state="disabled"
-        )
-        self.cancel_button.grid(row=row, column=0, columnspan=2, sticky="e", pady=(6, 0))
-
-        row += 1
         tip = ttk.Label(
             frame,
             text=(
@@ -1493,6 +1492,13 @@ class App(tk.Tk):
         ttk.Button(toolbar, text="Открыть папку", command=self._open_output_dir).pack(
             side="left", padx=(6, 0)
         )
+        self.cancel_button = ttk.Button(
+            toolbar,
+            text="Остановить всё",
+            command=self._cancel,
+            state="disabled",
+        )
+        self.cancel_button.pack(side="right")
 
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True)
@@ -1775,6 +1781,58 @@ class App(tk.Tk):
         )
         if filename:
             self.tool_var.set(filename)
+
+    def _clear_saved_logins(self):
+        if not messagebox.askyesno(
+            "Очистить сохранённые логины",
+            "Удалить сохранённые логины DepotDownloader и steamctl?\n\n"
+            "После этого при следующем запуске потребуется вход "
+            "(QR-код или пароль). Данные Steam Guard не удаляются.",
+        ):
+            return
+
+        removed = []
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            # steamctl: сохранённые ключи входа и последний логин
+            client_dir = Path(local) / "steamctl" / "steamctl" / "client"
+            if client_dir.is_dir():
+                for path in client_dir.glob("*.key"):
+                    try:
+                        path.unlink()
+                        removed.append(str(path))
+                    except OSError:
+                        pass
+                lastuser = client_dir / "lastuser"
+                if lastuser.exists():
+                    try:
+                        lastuser.unlink()
+                        removed.append(str(lastuser))
+                    except OSError:
+                        pass
+
+            # DepotDownloader: account.config в isolated storage
+            pattern = str(Path(local) / "IsolatedStorage" / "**" / "account.config")
+            for path in glob.glob(pattern, recursive=True):
+                try:
+                    Path(path).unlink()
+                    removed.append(path)
+                except OSError:
+                    pass
+
+        self._append_log(
+            "\n=== Очистка сохранённых логинов ===\n"
+            + (
+                "\n".join(f"удалено: {path}" for path in removed) + "\n"
+                if removed
+                else "Не найдено сохранённых логинов.\n"
+            )
+        )
+        messagebox.showinfo(
+            "Готово",
+            f"Удалено файлов: {len(removed)}.\n"
+            "При следующем входе потребуется QR-код или пароль.",
+        )
 
     def _autodetect_tools(self):
         backend = self.backend_var.get()
