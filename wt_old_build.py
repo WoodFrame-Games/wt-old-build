@@ -370,12 +370,11 @@ def build_depotdownloader_cmd(
     ]
     user = (user or "").strip()
     if user:
-        # после успешного QR-входа DepotDownloader сохраняет refresh token.
-        # -remember-password заставляет использовать его вместо ввода пароля.
-        cmd += ["-username", user, "-remember-password"]
-    elif qr:
+        cmd += ["-username", user]
+    if qr:
         cmd.append("-qr")
-    if remember_password and not user:
+    # -remember-password нужен и при сохрании токена, и вместе с -qr
+    if remember_password or user:
         cmd.append("-remember-password")
     return cmd
 
@@ -1820,12 +1819,22 @@ class App(tk.Tk):
                 except OSError:
                     pass
 
+        if removed:
+            self.user_var.set("")
+            self.qr_var.set(True)
+            self.remember_var.set(True)
         self._append_log(
             "\n=== Очистка сохранённых логинов ===\n"
             + (
                 "\n".join(f"удалено: {path}" for path in removed) + "\n"
                 if removed
                 else "Не найдено сохранённых логинов.\n"
+            )
+            + (
+                "Режим QR-входа включён автоматически — отсканируйте код "
+                "при следующей загрузке.\n"
+                if removed
+                else ""
             )
         )
         messagebox.showinfo(
@@ -2600,7 +2609,7 @@ def selftest() -> int:
         "dd.exe", APP_ID, "236391", "3264770838696250786", r"C:\WT_old",
         qr=True, user="example_user",
     )
-    assert "-username" in cmd3 and "-qr" not in cmd3
+    assert "-username" in cmd3 and "-qr" in cmd3
     assert "-remember-password" in cmd3
 
     cmd2 = build_steamctl_cmd(
