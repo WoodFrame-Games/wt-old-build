@@ -91,6 +91,15 @@ DEFAULT_SETTINGS = {
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
+# Приглашения, которые getpass()/input() печатают БЕЗ перевода строки.
+PROMPT_MARKERS = (
+    b"password:",
+    b"enter password",
+    b"enter 2fa",
+    b"enter email code",
+    b"enter auth code",
+)
+
 MONTHS = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
@@ -255,6 +264,29 @@ def decode_console(raw: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return raw.decode("utf-8", "replace")
+
+
+def iter_console_output(stream):
+    """Отдаёт куски вывода, не дожидаясь перевода после приглашения ввода."""
+    buf = b""
+    while True:
+        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
+        if not chunk:
+            break
+        buf += chunk
+        while True:
+            lower = buf.lower()
+            if any(marker in lower for marker in PROMPT_MARKERS):
+                yield decode_console(buf)
+                buf = b""
+                break
+            index = buf.find(b"\n")
+            if index < 0:
+                break
+            yield decode_console(buf[: index + 1])
+            buf = buf[index + 1 :]
+    if buf:
+        yield decode_console(buf)
 
 
 def normalize_date(value: str) -> str:
@@ -1801,8 +1833,8 @@ class App(tk.Tk):
 
     def _read_login_output(self, proc: subprocess.Popen):
         assert proc.stdout is not None
-        for raw in iter(proc.stdout.readline, b""):
-            text = strip_ansi(decode_console(raw)).rstrip("\n")
+        for chunk in iter_console_output(proc.stdout):
+            text = strip_ansi(chunk).rstrip("\n")
             if text.strip():
                 self._queue.put(("log", text + "\n"))
         rc = proc.wait()
@@ -2043,8 +2075,8 @@ class App(tk.Tk):
 
         self._proc = proc
         assert proc.stdout is not None
-        for raw in iter(proc.stdout.readline, b""):
-            text = strip_ansi(decode_console(raw))
+        for chunk in iter_console_output(proc.stdout):
+            text = strip_ansi(chunk)
             if "\r" in text:
                 parts = [piece for piece in text.replace("\r", "\n").split("\n") if piece.strip()]
                 text = parts[-1] if parts else ""
