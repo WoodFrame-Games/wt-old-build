@@ -2129,6 +2129,12 @@ class App(tk.Tk):
             proc.stdin.flush()
             # само значение пароля/кода НЕ пишем в лог — только длину
             self._append_log(f"[INFO] отправлено символов: {len(text)}\n")
+            non_ascii = sum(1 for char in text if ord(char) > 127)
+            if non_ascii:
+                self._append_log(
+                    "[INFO] Ввод содержит не-ASCII символов: "
+                    f"{non_ascii}. Проверьте раскладку клавиатуры.\n"
+                )
             self.stdin_var.set("")
             self._set_input_enabled(False)
         except (OSError, ValueError) as exc:
