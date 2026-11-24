@@ -1788,7 +1788,10 @@ class App(tk.Tk):
         user = self.user_var.get().strip()
         if user:
             cmd += ["--user", user]
-        cmd += ["apps", "list"]
+        cmd += ["depot", "info", "--app", str(self.app_var.get().strip() or APP_ID)]
+        entry = self.entries[0] if self.entries else None
+        if entry:
+            cmd += ["--depot", str(entry["depot"]), "--manifest", str(entry["manifest"])]
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["NO_COLOR"] = "1"
@@ -1987,6 +1990,13 @@ class App(tk.Tk):
             f"Log: {self._log_path}\n"
             + "=" * 78 + "\n"
         )
+        if self.backend_var.get() == "steamctl":
+            has_password = bool(self._extra_env.get("STEAMCTL_PASSWORD"))
+            self._append_log(
+                "[INFO] Пароль для steamctl: "
+                + ("передан через STEAMCTL_PASSWORD\n" if has_password
+                   else "НЕ задан — ожидается ввод в поле «Ввод»\n")
+            )
 
         self._worker = threading.Thread(
             target=self._run_jobs, args=(jobs, str(self._log_path)), daemon=True
