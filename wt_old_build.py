@@ -1660,19 +1660,21 @@ class App(tk.Tk):
         self.user_label.configure(
             text="steamctl user:" if backend == "steamctl" else "Имя пользователя Steam:"
         )
-        # подставить сохранённый путь для выбранного бэкенда
+        # всегда подставляем путь, соответствующий выбранному бэкенду
         if is_dd:
-            current = self.settings.get("dd_path", "")
-            if current and Path(current).exists():
-                self.tool_var.set(current)
+            current = self.settings.get("dd_path", "") or find_depotdownloader()
+            if not current or "steamctl" in str(current).lower():
+                current = find_depotdownloader()
         else:
-            current = self.settings.get("steamctl_path", "")
-            if current and Path(current).exists():
-                self.tool_var.set(current)
+            current = self.settings.get("steamctl_path", "") or find_steamctl()
+            if not current or "DepotDownloader" in str(current):
+                current = find_steamctl()
+        if current:
+            self.tool_var.set(current)
 
     def _steamctl_executable(self) -> str:
         exe = self.tool_var.get().strip()
-        if self.backend_var.get() == "steamctl" and exe:
+        if self.backend_var.get() == "steamctl" and exe and "DepotDownloader" not in exe:
             return exe
         return self.settings.get("steamctl_path", "") or find_steamctl()
 
@@ -1733,8 +1735,13 @@ class App(tk.Tk):
         exe = self.tool_var.get().strip()
         if not exe:
             exe = find_steamctl() if backend == "steamctl" else find_depotdownloader()
-            if exe:
-                self.tool_var.set(exe)
+        # защита от «гибридной» команды: путь обязан соответствовать бэкенду
+        if backend == "steamctl" and ("DepotDownloader" in exe or "depotdownloader" in exe.lower()):
+            exe = find_steamctl()
+        elif backend == "depotdownloader" and "steamctl" in exe.lower():
+            exe = find_depotdownloader()
+        if exe:
+            self.tool_var.set(exe)
         if not exe:
             messagebox.showerror("Ошибка", "Не найден исполняемый файл инструмента.")
             return None
